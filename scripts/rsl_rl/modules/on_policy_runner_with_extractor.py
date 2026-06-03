@@ -260,7 +260,10 @@ class OnPolicyRunnerWithExtractor(OnPolicyRunner):
                         privileged_obs = obs
 
                     # process the step
-                    self.alg.process_env_step(rewards, dones, infos)
+                    try:
+                        self.alg.process_env_step(obs_dict, rewards, dones, infos)
+                    except TypeError:
+                        self.alg.process_env_step(rewards, dones, infos)
 
                     # Extract intrinsic rewards (only for logging)
                     intrinsic_rewards = self.alg.intrinsic_rewards if self.alg.rnd else None
