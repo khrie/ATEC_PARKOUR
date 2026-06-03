@@ -21,6 +21,19 @@ from .distillation_with_extractor import DistillationWithExtractor
 from copy import copy 
 import warnings 
 
+
+def _extract_obs(obs_dict):
+    if isinstance(obs_dict, dict) or hasattr(obs_dict, 'keys'):
+        if "policy" in obs_dict:
+            return obs_dict["policy"]
+        elif "proprio" in obs_dict:
+            import torch
+            obs_parts = [obs_dict["proprio"]]
+            if "extero" in obs_dict and isinstance(obs_dict["extero"], torch.Tensor) and obs_dict["extero"].numel() > 0:
+                obs_parts.append(obs_dict["extero"])
+            return torch.cat(obs_parts, dim=-1)
+    return obs_dict
+
 class OnPolicyRunnerWithExtractor(OnPolicyRunner):
     def __init__(self, env: VecEnv, train_cfg: dict, log_dir: str | None = None, device="cpu"):
         self.cfg = train_cfg
@@ -41,7 +54,7 @@ class OnPolicyRunnerWithExtractor(OnPolicyRunner):
             raise ValueError(f"Training type not found for algorithm {self.alg_cfg['class_name']}.")
 
         obs_dict = self.env.get_observations()
-        obs = obs_dict["policy"] if "policy" in obs_dict.keys() else obs_dict
+        obs = _extract_obs(obs_dict)
         num_obs = obs.shape[1]
         
         if self.training_type == "rl":
@@ -181,8 +194,16 @@ class OnPolicyRunnerWithExtractor(OnPolicyRunner):
 
         # start learning
         obs_dict = self.env.get_observations()
-        obs = obs_dict["policy"] if "policy" in obs_dict.keys() else obs_dict
-        privileged_obs = obs_dict.get(self.privileged_obs_type, obs) if (self.privileged_obs_type is not None and (isinstance(obs_dict, dict) or hasattr(obs_dict, 'get'))) else obs
+        obs = _extract_obs(obs_dict)
+        if self.privileged_obs_type is None:
+            privileged_obs = obs
+        elif isinstance(obs_dict, dict) or hasattr(obs_dict, 'keys'):
+            if self.privileged_obs_type in obs_dict.keys():
+                privileged_obs = obs_dict[self.privileged_obs_type]
+            else:
+                privileged_obs = obs
+        else:
+            privileged_obs = obs
         obs, privileged_obs = obs.to(self.device), privileged_obs.to(self.device)
         self.train_mode()  # switch to train mode (for dropout for example)
 
@@ -222,7 +243,7 @@ class OnPolicyRunnerWithExtractor(OnPolicyRunner):
                     # Step the environment
                     obs_dict, rewards, dones, infos = self.env.step(actions.to(self.env.device))
                     # Extract tensors from dict
-                    obs = obs_dict["policy"] if "policy" in obs_dict.keys() else obs_dict
+                    obs = _extract_obs(obs_dict)
                     # Move to device
                     obs, rewards, dones = (obs.to(self.device), rewards.to(self.device), dones.to(self.device))
                     # perform normalization
@@ -339,7 +360,7 @@ class OnPolicyRunnerWithExtractor(OnPolicyRunner):
         additional_obs = {}
         additional_obs["delta_yaw_ok"] = obs_dict['delta_yaw_ok'].to(self.device)
         additional_obs["depth_camera"] = obs_dict['depth_camera'].to(self.device)
-        obs = obs_dict["policy"] if "policy" in obs_dict.keys() else obs_dict
+        obs = _extract_obs(obs_dict)
         obs = obs.to(self.device)
 
         self.alg.depth_encoder.train()
@@ -382,13 +403,13 @@ class OnPolicyRunnerWithExtractor(OnPolicyRunner):
                 if it < num_pretrain_iter:
                     # Step the environment
                     obs_dict, _, dones, infos = self.env.step(actions_teacher.detach().to(self.env.device))
-                    obs = obs_dict["policy"] if "policy" in obs_dict.keys() else obs_dict
+                    obs = _extract_obs(obs_dict)
                     # Move to device
                     obs, dones = (obs.to(self.device), dones.to(self.device))
                 else:
                     # Step the environment
                     obs_dict, _, dones, infos = self.env.step(actions_student.detach().to(self.env.device))
-                    obs = obs_dict["policy"] if "policy" in obs_dict.keys() else obs_dict
+                    obs = _extract_obs(obs_dict)
                     # Move to device
                     obs, dones = (obs.to(self.device), dones.to(self.device))
                 additional_obs['delta_yaw_ok'] = obs_dict['delta_yaw_ok']

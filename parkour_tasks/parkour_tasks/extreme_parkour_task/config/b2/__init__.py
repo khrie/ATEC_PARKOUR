@@ -60,6 +60,17 @@ gym.register(
 )
 
 gym.register(
+    id="Isaac-Extreme-Parkour-Student-Unitree-B2-Train-v0",
+    entry_point="parkour_isaaclab.envs:ParkourManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.parkour_student_cfg:UnitreeB2StudentParkourEnvCfg_TRAIN",
+        "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_student_ppo_cfg:UnitreeB2ParkourStudentPPORunnerCfg",
+        "skrl_cfg_entry_point": f"{agents.__name__}:skrl_parkour_ppo_cfg.yaml",
+    },
+)
+
+gym.register(
     id="Isaac-Extreme-Parkour-Student-Unitree-B2-Play-v0",
     entry_point="parkour_isaaclab.envs:ParkourManagerBasedRLEnv",
     disable_env_checker=True,

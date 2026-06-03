@@ -26,17 +26,26 @@ class ParkourRslRlVecEnvWrapper(VecEnv):
         else:
             self.num_actions = gym.spaces.flatdim(self.unwrapped.single_action_space)
         if hasattr(self.unwrapped, "observation_manager"):
-            self.num_obs = self.unwrapped.observation_manager.group_obs_dim["policy"][0]
+            if "policy" in self.unwrapped.observation_manager.group_obs_dim:
+                self.num_obs = self.unwrapped.observation_manager.group_obs_dim["policy"][0]
+            elif "proprio" in self.unwrapped.observation_manager.group_obs_dim:
+                self.num_obs = self.unwrapped.observation_manager.group_obs_dim["proprio"][0]
+                if "extero" in self.unwrapped.observation_manager.group_obs_dim:
+                    ext_dim = self.unwrapped.observation_manager.group_obs_dim["extero"]
+                    if len(ext_dim) > 0:
+                        self.num_obs += ext_dim[0]
+            else:
+                raise KeyError("Neither 'policy' nor 'proprio' found in observation groups")
         else:
-            self.num_obs = gym.spaces.flatdim(self.unwrapped.single_observation_space["policy"])
+            self.num_obs = gym.spaces.flatdim(self.unwrapped.single_observation_space["proprio"])
         # -- privileged observations
         if (
             hasattr(self.unwrapped, "observation_manager")
-            and "critic" in self.unwrapped.observation_manager.group_obs_dim
+            and "privileged" in self.unwrapped.observation_manager.group_obs_dim
         ):
-            self.num_privileged_obs = self.unwrapped.observation_manager.group_obs_dim["critic"][0]
-        elif hasattr(self.unwrapped, "num_states") and "critic" in self.unwrapped.single_observation_space:
-            self.num_privileged_obs = gym.spaces.flatdim(self.unwrapped.single_observation_space["critic"])
+            self.num_privileged_obs = self.unwrapped.observation_manager.group_obs_dim["privileged"][0]
+        elif hasattr(self.unwrapped, "num_states") and "privileged" in self.unwrapped.single_observation_space:
+            self.num_privileged_obs = gym.spaces.flatdim(self.unwrapped.single_observation_space["privileged"])
         else:
             self.num_privileged_obs = 0
 

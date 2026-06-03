@@ -21,11 +21,11 @@ RslRlPpoAlgorithmCfg,
 
 @configclass
 class ParkourRslRlBaseCfg:
-    num_priv_explicit: int = 3 + 3 + 3 # 9
-    num_priv_latent: int = 4 + 1 + 12 +12 # 29
-    num_prop: int = 3 + 2 + 3 + 4 + 36 + 5 # 53
+    num_priv_explicit: int = 0
+    num_priv_latent: int = 0
+    num_prop: int = 48
     num_scan: int = 132
-    num_hist: int = 10
+    num_hist: int = 0
     
 @configclass
 class ParkourRslRlStateHistEncoderCfg(ParkourRslRlBaseCfg):
@@ -40,6 +40,7 @@ class ParkourRslRlDepthEncoderCfg(ParkourRslRlBaseCfg):
     hidden_dims: int = 512
     learning_rate: float = 1.e-3
     num_steps_per_env: int = 24 * 5
+    num_prop: int = 48
 
 @configclass
 class ParkourRslRlEstimatorCfg(ParkourRslRlBaseCfg):
@@ -51,7 +52,7 @@ class ParkourRslRlEstimatorCfg(ParkourRslRlBaseCfg):
 @configclass
 class ParkourRslRlActorCfg(ParkourRslRlBaseCfg):
     class_name: str = "Actor"
-    state_history_encoder: ParkourRslRlStateHistEncoderCfg = MISSING
+    # state_history_encoder: ParkourRslRlStateHistEncoderCfg = MISSING
 
 
 @configclass

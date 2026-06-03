@@ -66,6 +66,23 @@ class UnitreeB2StudentParkourEnvCfg(ParkourManagerBasedRLEnvCfg):
         self.actions.joint_pos.use_delay = True
         self.actions.joint_pos.history_length = 8
 
+        # Disable sensors not present in the B2 scene that are required by ObservationsCfg
+        self.scene.lidar_sensor = None
+        self.observations.extero.lidar_scan = None
+        self.observations.extero.concatenate_terms = False
+
+        self.scene.head_camera = None
+        self.observations.image.head_rgb = None
+        self.observations.image.head_depth = None
+
+        self.scene.ee_camera = None
+        self.observations.image.ee_rgb = None
+        self.observations.image.ee_depth = None
+        
+        self.scene.ee_dual_camera = None
+        self.observations.image.ee_dual_rgb = None
+        self.observations.image.ee_dual_depth = None
+
 
 
 @configclass
@@ -82,7 +99,7 @@ class UnitreeB2StudentParkourEnvCfg_EVAL(UnitreeB2StudentParkourEnvCfg):
         self.scene.depth_camera_usd = CAMERA_USD_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot/base_link/d435")
         self.scene.terrain.max_init_terrain_level = None
 
-        self.observations.depth_camera.depth_cam.params['debug_vis'] = True
+        # self.observations.depth_camera.depth_cam.params['debug_vis'] = True
 
         self.commands.base_velocity.resampling_time_range = (60.,60.)
         self.commands.base_velocity.debug_vis = True
@@ -123,4 +140,13 @@ class UnitreeB2StudentParkourEnvCfg_PLAY(UnitreeB2StudentParkourEnvCfg_EVAL):
             else:
                 sub_terrain.proportion = 0.25
                 sub_terrain.noise_range = (0.02, 0.02)
+
+@configclass
+class UnitreeB2StudentParkourEnvCfg_TRAIN(UnitreeB2StudentParkourEnvCfg):
+    observations: StudentObservationsCfg_TRAIN = StudentObservationsCfg_TRAIN()
+
+    def __post_init__(self):
+        # post init of parent
+        super().__post_init__()
+
 

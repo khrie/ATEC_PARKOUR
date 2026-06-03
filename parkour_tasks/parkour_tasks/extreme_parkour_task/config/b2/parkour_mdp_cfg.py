@@ -5,6 +5,8 @@ from isaaclab.managers import RewardTermCfg as RewTerm
 from isaaclab.managers import SceneEntityCfg
 from isaaclab.managers import TerminationTermCfg as DoneTerm
 from isaaclab.utils import configclass
+from isaaclab.envs import mdp
+from isaaclab.utils.noise import AdditiveUniformNoiseCfg as Unoise
 from isaaclab.envs.mdp.events import ( 
 randomize_rigid_body_mass,
 apply_external_force_torque,
@@ -13,6 +15,7 @@ reset_joints_by_scale
 )
 from isaaclab.envs.mdp.rewards import undesired_contacts
 from parkour_isaaclab.envs.mdp.parkour_actions import DelayedJointPositionActionCfg 
+from parkour_tasks.extreme_parkour_task.utils.atec_observation import AtecTeacherObservations
 from parkour_isaaclab.envs.mdp import terminations, rewards, parkours, events, observations, parkour_commands
 
 @configclass
@@ -48,59 +51,153 @@ class TeacherObservationsCfg:
     class PolicyCfg(ObsGroup):
         """Observations for policy group."""
         # observation terms (order preserved)
-        extreme_parkour_observations = ObsTerm(
-            func=observations.ExtremeParkourObservations,
-            params={            
-            "asset_cfg":SceneEntityCfg("robot"),
-            "sensor_cfg":SceneEntityCfg("contact_forces", body_names=".*_foot"),
-            "parkour_name":'base_parkour',
-            "history_length": 10
-            },
-            clip= (-100,100)
+        teacher = ObsTerm(
+            func=AtecTeacherObservations,
+            params={
+                "asset_cfg":SceneEntityCfg("robot"),
+            }
         )
     policy: PolicyCfg = PolicyCfg()
 
 @configclass
 class StudentObservationsCfg:
+    """Observation specifications for the MDP."""
 
     @configclass
-    class PolicyCfg(ObsGroup):
-        """Observations for policy group."""
-        extreme_parkour_observations = ObsTerm(
-            func=observations.ExtremeParkourObservations,
-            params={            
-            "asset_cfg":SceneEntityCfg("robot"),
-            "sensor_cfg":SceneEntityCfg("contact_forces", body_names=".*_foot"),
-            "parkour_name":'base_parkour',
-            "history_length": 10,
-            },
-            clip= (-100,100)
+    class ProprioObservationsCfg(ObsGroup):
+        """Observations for proprioception group."""
+        # observation terms (order preserved)
+        base_lin_vel = ObsTerm(
+            func=mdp.base_lin_vel, noise=Unoise(n_min=-0.1, n_max=0.1)
+        )
+        base_ang_vel = ObsTerm(
+            func=mdp.base_ang_vel, noise=Unoise(n_min=-0.2, n_max=0.2)
+        )
+        velocity_commands = ObsTerm(
+            func=mdp.generated_commands,
+            params={"command_name": "base_velocity"},
+            clip=(-100.0, 100.0),
+            scale=1.0,
+        )
+        projected_gravity = ObsTerm(
+            func=mdp.projected_gravity,
+            noise=Unoise(n_min=-0.05, n_max=0.05),
+        )
+        joint_pos = ObsTerm(
+            func=mdp.joint_pos_rel,
+            params={"asset_cfg": SceneEntityCfg("robot", joint_names=".*", preserve_order=True)},
+            noise=Unoise(n_min=-0.01, n_max=0.01)
+        )
+        joint_vel = ObsTerm(
+            func=mdp.joint_vel_rel,
+            params={"asset_cfg": SceneEntityCfg("robot", joint_names=".*", preserve_order=True)},
+            noise=Unoise(n_min=-1.5, n_max=1.5))
+        actions = ObsTerm(func=mdp.last_action)
+
+        def __post_init__(self):
+            self.enable_corruption = False
+            self.concatenate_terms = True
+
+    @configclass
+    class ExteroObservationsCfg(ObsGroup):
+        """Observations for exteroception group."""
+
+        # observation terms (order preserved)
+        lidar_scan = ObsTerm(
+            func=mdp.height_scan, params={"sensor_cfg": SceneEntityCfg("lidar_sensor")}
         )
 
+        def __post_init__(self):
+            self.enable_corruption = False
+            self.concatenate_terms = True
+
     @configclass
-    class DepthCameraPolicyCfg(ObsGroup):
+    class ImageObservationsCfg(ObsGroup):
+        """Observations for image group."""
+
+        # observation terms (order preserved)
+        head_rgb = ObsTerm(
+            func=mdp.image,
+            params={"sensor_cfg": SceneEntityCfg("head_camera"), "data_type": "rgb", "normalize": False,},
+        )
+        head_depth = ObsTerm(
+            func=mdp.image,
+            params={"sensor_cfg": SceneEntityCfg("head_camera"), "data_type": "depth"},
+        )
+
+        ee_rgb = ObsTerm(
+            func=mdp.image,
+            params={"sensor_cfg": SceneEntityCfg("ee_camera"), "data_type": "rgb", "normalize": False,},
+        )
+        ee_depth = ObsTerm(
+            func=mdp.image,
+            params={"sensor_cfg": SceneEntityCfg("ee_camera"), "data_type": "depth"},
+        )
+
+        ee_dual_rgb = ObsTerm(
+            func=mdp.image,
+            params={"sensor_cfg": SceneEntityCfg("ee_dual_camera"), "data_type": "rgb", "normalize": False,},
+        )
+        ee_dual_depth = ObsTerm(
+            func=mdp.image,
+            params={"sensor_cfg": SceneEntityCfg("ee_dual_camera"), "data_type": "depth"},
+        )
+
+        def __post_init__(self):
+            self.enable_corruption = False
+            self.concatenate_terms = False
+
+    # observation groups
+    proprio: ProprioObservationsCfg = ProprioObservationsCfg()
+    extero: ExteroObservationsCfg = ExteroObservationsCfg()
+    image: ImageObservationsCfg = ImageObservationsCfg()
+
+@configclass
+class StudentObservationsCfg_TRAIN(StudentObservationsCfg):
+    @configclass
+    class PrivilegedObservationsCfg(ObsGroup):
+        extreme_parkour_observations = ObsTerm(
+            func=AtecTeacherObservations,
+            params={            
+            "asset_cfg":SceneEntityCfg("robot"),
+            }
+        )
+        def __post_init__(self):
+            self.enable_corruption = False
+            self.concatenate_terms = True
+
+    @configclass
+    class DeltaYawOkCfg(ObsGroup):
+        delta_yaw_ok = ObsTerm(
+            func=observations.obervation_delta_yaw_ok,
+            params={
+                "asset_cfg":SceneEntityCfg("robot"),
+                "parkour_name":'base_parkour',
+                "threshold": 0.5
+            },
+        )
+        def __post_init__(self):
+            self.enable_corruption = False
+            self.concatenate_terms = True
+
+    @configclass
+    class DepthCameraCfg(ObsGroup):
         depth_cam = ObsTerm(
             func=observations.image_features,
-            params={            
+            params={
             "sensor_cfg":SceneEntityCfg("depth_camera"),
             "resize": (58, 87),
             "buffer_len": 2,
             "debug_vis":True
             },
         )
+        def __post_init__(self):
+            self.enable_corruption = False
+            self.concatenate_terms = True
 
-    @configclass
-    class DeltaYawOkPolicyCfg(ObsGroup):
-        deta_yaw_ok =  ObsTerm(
-            func=observations.obervation_delta_yaw_ok,
-            params={            
-            "parkour_name":'base_parkour',
-            'threshold': 0.6
-            },
-        )
-    policy: PolicyCfg = PolicyCfg()
-    depth_camera: DepthCameraPolicyCfg = DepthCameraPolicyCfg()
-    delta_yaw_ok: DeltaYawOkPolicyCfg = DeltaYawOkPolicyCfg()
+    teacher: PrivilegedObservationsCfg = PrivilegedObservationsCfg()
+    delta_yaw_ok: DeltaYawOkCfg = DeltaYawOkCfg()
+    depth_camera: DepthCameraCfg = DepthCameraCfg()
 
 
 @configclass
@@ -272,15 +369,7 @@ class EventCfg:
         },
         mode="reset",
     )
-    physics_material = EventTerm( # Okay
-        func=events.randomize_rigid_body_material,
-        mode="startup",
-        params={
-            "asset_cfg": SceneEntityCfg("robot", body_names=".*"),
-            "friction_range": (0.6, 2.0),
-            "num_buckets": 64,
-        },
-    )
+    physics_material = None
 
     ## we don't use this event, If you use this, you will get a bad result
     # randomize_actuator_gains = EventTerm(
@@ -293,23 +382,8 @@ class EventCfg:
     #         },
     #     mode="startup",
     # )
-    randomize_rigid_body_mass = EventTerm(
-        func= randomize_rigid_body_mass,
-        mode="startup",
-        params={
-            "asset_cfg": SceneEntityCfg("robot", body_names="base_link"),
-            "mass_distribution_params": (-1., 3.0),
-            "operation": "add",
-            },
-    )
-    randomize_rigid_body_com = EventTerm(
-        func= events.randomize_rigid_body_com,
-        mode="startup",
-        params={
-            "asset_cfg": SceneEntityCfg("robot", body_names="base_link"),
-            "com_range": {'x':(-0.02, 0.02),'y':(-0.02, 0.02),'z':(-0.02, 0.02)}
-            },
-    )
+    randomize_rigid_body_mass = None
+    randomize_rigid_body_com = None
     random_camera_position = EventTerm(
         func= events.random_camera_position,
         mode="startup",
@@ -318,13 +392,7 @@ class EventCfg:
                 'convention':'ros',
                 },
     )
-    push_by_setting_velocity = EventTerm( # Okay
-        func = events.push_by_setting_velocity, 
-        params={'velocity_range':{"x":(-0.5, 0.5), "y":(-0.5, 0.5)}},
-        interval_range_s = (8. ,8. ),
-        is_global_time= True, 
-        mode="interval",
-    )
+    push_by_setting_velocity = None
     base_external_force_torque = EventTerm(  # Okay
         func=apply_external_force_torque,
         mode="reset",

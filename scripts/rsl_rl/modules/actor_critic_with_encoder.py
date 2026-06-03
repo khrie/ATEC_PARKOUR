@@ -30,7 +30,7 @@ class Actor(nn.Module):
         self.if_scan_encode = scan_encoder_dims is not None and num_scan > 0
         self.in_features = num_prop + num_scan + num_priv_latent + num_priv_explicit + num_prop * num_hist ##  +  
 
-        if len(priv_encoder_dims) > 0:
+        if priv_encoder_dims is not None and len(priv_encoder_dims) > 0 and num_priv_latent > 0:
             priv_encoder_layers = []
             priv_encoder_layers.append(nn.Linear(num_priv_latent, priv_encoder_dims[0]))
             priv_encoder_layers.append(activation)
@@ -41,17 +41,20 @@ class Actor(nn.Module):
             priv_encoder_output_dim = priv_encoder_dims[-1]
         else:
             self.priv_encoder = nn.Identity()
-            priv_encoder_output_dim = num_priv_latent
+            priv_encoder_output_dim = 0
 
-        state_history_encoder_cfg = kwargs.pop('state_history_encoder')
-        state_histroy_encoder_class = eval(state_history_encoder_cfg.pop('class_name'))
-        self.history_encoder: StateHistoryEncoder = state_histroy_encoder_class(
-                                                            activation, 
-                                                            num_prop, 
-                                                            num_hist, 
-                                                            priv_encoder_output_dim,
-                                                            state_history_encoder_cfg.pop('channel_size')
-                                                            )
+        state_history_encoder_cfg = kwargs.pop('state_history_encoder', None)
+        if state_history_encoder_cfg is not None and num_hist > 0:
+            state_histroy_encoder_class = eval(state_history_encoder_cfg.pop('class_name'))
+            self.history_encoder = state_histroy_encoder_class(
+                                                                activation, 
+                                                                num_prop, 
+                                                                num_hist, 
+                                                                priv_encoder_output_dim,
+                                                                state_history_encoder_cfg.pop('channel_size')
+                                                                )
+        else:
+            self.history_encoder = None
         if self.if_scan_encode:
             scan_encoder = []
             scan_encoder.append(nn.Linear(num_scan, scan_encoder_dims[0]))
@@ -90,6 +93,7 @@ class Actor(nn.Module):
         self, 
         obs, 
         hist_encoding: bool, 
+        privileged_obs: Optional[torch.Tensor] = None,
         scandots_latent: Optional[torch.Tensor] = None
         ):
         if self.if_scan_encode:
@@ -101,16 +105,25 @@ class Actor(nn.Module):
             obs_prop_scan = torch.cat([obs[:, :self.num_prop], scan_latent], dim=1)
         else:
             obs_prop_scan = obs[:, :self.num_prop + self.num_scan]
-        obs_priv_explicit = obs[:, self.num_prop + self.num_scan:self.num_prop + self.num_scan + self.num_priv_explicit]
-        if hist_encoding:
-            latent = self.infer_hist_latent(obs)
+            
+        # Extract privileged features from privileged_obs if provided, else assume it's in obs
+        priv_source = privileged_obs if privileged_obs is not None else obs
+        obs_priv_explicit = priv_source[:, self.num_prop + self.num_scan:self.num_prop + self.num_scan + self.num_priv_explicit]
+        
+        if hist_encoding and self.num_hist > 0:
+            latent = self.infer_hist_latent(priv_source)
+        elif self.num_priv_latent > 0:
+            latent = self.infer_priv_latent(priv_source)
         else:
-            latent = self.infer_priv_latent(obs)
+            latent = torch.zeros((obs.shape[0], 0), device=obs.device)
+            
         backbone_input = torch.cat([obs_prop_scan, obs_priv_explicit, latent], dim=1)
         backbone_output = self.actor_backbone(backbone_input)
         return backbone_output
     
     def infer_priv_latent(self, obs):
+        if self.num_priv_latent == 0:
+            return torch.zeros((obs.shape[0], 0), device=obs.device)
         priv = obs[:, self.num_prop + self.num_scan + self.num_priv_explicit: self.num_prop + self.num_scan + self.num_priv_explicit + self.num_priv_latent]
         return self.priv_encoder(priv)
 
@@ -121,6 +134,8 @@ class Actor(nn.Module):
         pass
     
     def infer_hist_latent(self, obs):
+        if self.num_hist == 0 or self.history_encoder is None:
+            return torch.zeros((obs.shape[0], 0), device=obs.device)
         hist = obs[:, -self.num_hist*self.num_prop:]
         return self.history_encoder(hist.view(-1, self.num_hist, self.num_prop))
     
@@ -215,8 +230,8 @@ class ActorCriticRMA(nn.Module):
     def update_normalization(self, obs):
         pass
 
-    def update_distribution(self, observations, hist_encoding):
-        mean = self.actor(observations, hist_encoding)
+    def update_distribution(self, observations, hist_encoding, privileged_obs=None):
+        mean = self.actor(observations, hist_encoding, privileged_obs=privileged_obs)
         if self.noise_std_type == "scalar":
             std = mean*0. + self.std
         elif self.noise_std_type == "log":
@@ -225,15 +240,18 @@ class ActorCriticRMA(nn.Module):
             raise ValueError(f"Unknown standard deviation type: {self.noise_std_type}. Should be 'scalar' or 'log'")
         self.distribution = Normal(mean, std)
 
-    def act(self, observations, hist_encoding=False, **kwargs):
-        self.update_distribution(observations, hist_encoding)
+    def act(self, observations, hist_encoding=False, privileged_obs=None, **kwargs):
+        self.update_distribution(observations, hist_encoding, privileged_obs=privileged_obs)
         return self.distribution.sample()
     
     def get_actions_log_prob(self, actions):
         return self.distribution.log_prob(actions).sum(dim=-1)
     
-    def act_inference(self, observations, hist_encoding=False, scandots_latent=None, **kwargs):
-        actions_mean = self.actor(observations, hist_encoding, scandots_latent)
+    def act_inference(self, observations, hist_encoding=False, scandots_latent=None, privileged_obs=None, **kwargs):
+        pad_size = self.actor.in_features - observations.shape[1]
+        if pad_size > 0:
+            observations = torch.nn.functional.pad(observations, (0, pad_size))
+        actions_mean = self.actor(observations, hist_encoding, privileged_obs=privileged_obs, scandots_latent=scandots_latent)
         return actions_mean
 
     def evaluate(self, critic_observations, **kwargs):

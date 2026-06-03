@@ -20,13 +20,10 @@ class UnitreeB2ParkourTeacherPPORunnerCfg(ParkourRslRlOnPolicyRunnerCfg):
         actor_hidden_dims=[512, 256, 128],
         critic_hidden_dims=[512, 256, 128],
         scan_encoder_dims = [128, 64, 32],
-        priv_encoder_dims = [64, 20],
+        priv_encoder_dims = [],
         activation="elu",
         actor = ParkourRslRlActorCfg(
-            class_name = "Actor",
-            state_history_encoder = ParkourRslRlStateHistEncoderCfg(
-                class_name = "StateHistoryEncoder" 
-            )
+            class_name = "Actor"
         )
     )
     estimator = ParkourRslRlEstimatorCfg(

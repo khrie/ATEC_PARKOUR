@@ -8,6 +8,30 @@ import torch.optim as optim
 from .actor_critic_with_encoder import ActorCriticRMA
 from rsl_rl.algorithms import PPO
 
+def get_policy_obs(obs_dict):
+    if hasattr(obs_dict, "keys"):
+        if "policy" in obs_dict.keys():
+            return obs_dict["policy"]
+        elif "proprio" in obs_dict.keys():
+            obs_parts = [obs_dict["proprio"]]
+            if "extero" in obs_dict.keys() and isinstance(obs_dict["extero"], torch.Tensor):
+                obs_parts.append(obs_dict["extero"])
+            return torch.cat(obs_parts, dim=-1)
+    return obs_dict
+
+
+def _extract_obs(obs_dict):
+    if isinstance(obs_dict, dict) or hasattr(obs_dict, 'keys'):
+        if "policy" in obs_dict:
+            return obs_dict["policy"]
+        elif "proprio" in obs_dict:
+            import torch
+            obs_parts = [obs_dict["proprio"]]
+            if "extero" in obs_dict and isinstance(obs_dict["extero"], torch.Tensor) and obs_dict["extero"].numel() > 0:
+                obs_parts.append(obs_dict["extero"])
+            return torch.cat(obs_parts, dim=-1)
+    return obs_dict
+
 class PPOWithExtractor(PPO):
     policy: ActorCriticRMA
 
@@ -77,27 +101,38 @@ class PPOWithExtractor(PPO):
         self.num_scan = estimator_paras["num_scan"]
         self.estimator_optimizer = optim.Adam(self.estimator.parameters(), lr=estimator_paras["learning_rate"])
         self.train_with_estimated_states = estimator_paras["train_with_estimated_states"]
-        self.hist_encoder_optimizer = optim.Adam(self.policy.actor.history_encoder.parameters(), lr=learning_rate)
+        if self.policy.actor.history_encoder is not None:
+            self.hist_encoder_optimizer = optim.Adam(self.policy.actor.history_encoder.parameters(), lr=learning_rate)
+        else:
+            self.hist_encoder_optimizer = None
         self.priv_reg_coef_schedual = priv_reg_coef_schedual
         self.counter = 0
 
 
-    def act(self, obs_dict, hist_encoding=False, privileged_obs_type=None):
-        obs = obs_dict["policy"] if "policy" in obs_dict.keys() else obs_dict
-        critic_obs = obs_dict.get(privileged_obs_type, obs) if (privileged_obs_type is not None and hasattr(obs_dict, 'get')) else obs
-        
+    def act(self, obs_dict, **kwargs):
+        obs = _extract_obs(obs_dict)
+        privileged_obs_type = kwargs.get("privileged_obs_type")
+        if privileged_obs_type is None:
+            critic_obs = obs
+        elif isinstance(obs_dict, dict) or hasattr(obs_dict, 'keys'):
+            if privileged_obs_type in obs_dict.keys():
+                critic_obs = obs_dict[privileged_obs_type]
+            else:
+                critic_obs = obs
+        else:
+            critic_obs = obs
+
         if self.policy.is_recurrent:
             self.transition.hidden_states = self.policy.get_hidden_states()
-        # compute the actions and values
         if self.train_with_estimated_states:
             obs_est = obs.clone()
             priv_states_estimated = self.estimator(obs_est[:, :self.num_prop])
             obs_est[:, self.num_prop+self.num_scan:self.num_prop+self.num_scan+self.priv_states_dim] = priv_states_estimated
-            self.transition.actions = self.policy.act(obs_est, hist_encoding).detach()
+            self.transition.actions = self.policy.act(obs_est, **kwargs).detach()
         else:
-            self.transition.actions = self.policy.act(obs, hist_encoding).detach()
-
-        self.transition.values = self.policy.evaluate(critic_obs).detach()
+            self.transition.actions = self.policy.act(obs, **kwargs).detach()
+        
+        self.transition.values = self.policy.evaluate(critic_obs, **kwargs).detach()
         self.transition.actions_log_prob = self.policy.get_actions_log_prob(self.transition.actions).detach()
         self.transition.action_mean = self.policy.action_mean.detach()
         self.transition.action_sigma = self.policy.action_std.detach()
@@ -132,7 +167,7 @@ class PPOWithExtractor(PPO):
             generator = self.storage.mini_batch_generator(self.num_mini_batches, self.num_learning_epochs)
 
         for batch in generator:
-            obs_batch = batch.observations["policy"] if "policy" in batch.observations.keys() else batch.observations
+            obs_batch = _extract_obs(batch.observations)
             critic_obs_batch = batch.observations["critic"] if "critic" in batch.observations.keys() else obs_batch
             actions_batch = batch.actions
             target_values_batch = batch.values
@@ -376,7 +411,7 @@ class PPOWithExtractor(PPO):
         else:
             generator = self.storage.mini_batch_generator(self.num_mini_batches, self.num_learning_epochs)
         for batch in generator:
-            obs_batch = batch.observations["policy"] if "policy" in batch.observations.keys() else batch.observations
+            obs_batch = _extract_obs(batch.observations)
             critic_obs_batch = batch.observations["critic"] if "critic" in batch.observations.keys() else obs_batch
             actions_batch = batch.actions
             target_values_batch = batch.values
@@ -399,11 +434,12 @@ class PPOWithExtractor(PPO):
                 priv_latent_batch = self.policy.actor.infer_priv_latent(obs_batch)
             hist_latent_batch = self.policy.actor.infer_hist_latent(obs_batch)
             hist_latent_loss = (priv_latent_batch.detach() - hist_latent_batch).norm(p=2, dim=1).mean()
-            self.hist_encoder_optimizer.zero_grad()
-            hist_latent_loss.backward()
-            nn.utils.clip_grad_norm_(self.policy.actor.history_encoder.parameters(), self.max_grad_norm)
-            self.hist_encoder_optimizer.step()
-            mean_hist_latent_loss += hist_latent_loss.item()
+            if self.hist_encoder_optimizer is not None:
+                self.hist_encoder_optimizer.zero_grad()
+                hist_latent_loss.backward()
+                nn.utils.clip_grad_norm_(self.policy.actor.history_encoder.parameters(), self.max_grad_norm)
+                self.hist_encoder_optimizer.step()
+                mean_hist_latent_loss += hist_latent_loss.item()
         num_updates = self.num_learning_epochs * self.num_mini_batches
         mean_hist_latent_loss /= num_updates
         self.storage.clear()
