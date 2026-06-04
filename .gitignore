@@ -69,5 +69,6 @@ venv.bak/
 *.swp
 
 # Training Outputs
-logs/
+logs/rsl_rl/*
+!logs/rsl_rl/.gitkeep
 outputs/
