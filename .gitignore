@@ -70,4 +70,5 @@ venv.bak/
 
 # Training Outputs
 logs/
-outputs/
+outputs/*
+!outputs/.gitkeep
