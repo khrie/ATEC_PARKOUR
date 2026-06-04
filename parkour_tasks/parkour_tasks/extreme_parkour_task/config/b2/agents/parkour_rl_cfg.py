@@ -24,7 +24,7 @@ class ParkourRslRlBaseCfg:
     num_priv_explicit: int = 0
     num_priv_latent: int = 0
     num_prop: int = 48
-    num_scan: int = 132
+    num_scan: int = 5760
     num_hist: int = 0
     
 @configclass

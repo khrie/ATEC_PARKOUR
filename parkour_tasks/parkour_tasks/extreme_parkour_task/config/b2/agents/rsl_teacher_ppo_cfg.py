@@ -19,7 +19,7 @@ class UnitreeB2ParkourTeacherPPORunnerCfg(ParkourRslRlOnPolicyRunnerCfg):
         init_noise_std=1.0,
         actor_hidden_dims=[512, 256, 128],
         critic_hidden_dims=[512, 256, 128],
-        scan_encoder_dims = [128, 64, 32],
+        scan_encoder_dims = [512, 256, 128],
         priv_encoder_dims = [],
         activation="elu",
         actor = ParkourRslRlActorCfg(

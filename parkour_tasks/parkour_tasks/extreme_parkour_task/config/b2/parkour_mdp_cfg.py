@@ -1,3 +1,4 @@
+import torch
 from isaaclab.managers import EventTermCfg as EventTerm
 from isaaclab.managers import ObservationGroupCfg as ObsGroup
 from isaaclab.managers import ObservationTermCfg as ObsTerm
@@ -15,7 +16,7 @@ reset_joints_by_scale
 )
 from isaaclab.envs.mdp.rewards import undesired_contacts
 from parkour_isaaclab.envs.mdp.parkour_actions import DelayedJointPositionActionCfg 
-from parkour_tasks.extreme_parkour_task.utils.atec_observation import AtecTeacherObservations
+
 from parkour_isaaclab.envs.mdp import terminations, rewards, parkours, events, observations, parkour_commands
 
 @configclass
@@ -43,6 +44,12 @@ class ParkourEventsCfg:
         asset_name = 'robot',
         )
 
+def safe_lidar_scan(env, sensor_cfg: SceneEntityCfg) -> torch.Tensor:
+    sensor = env.scene.sensors[sensor_cfg.name]
+    scan = sensor.data.pos_w[:, 2].unsqueeze(1) - sensor.data.ray_hits_w[..., 2]
+    scan = torch.nan_to_num(scan, nan=-10.0, posinf=-10.0, neginf=-10.0)
+    return torch.clip(scan, -1.0, 1.0)
+
 @configclass
 class TeacherObservationsCfg:
     """Observation specifications for the MDP."""
@@ -50,13 +57,22 @@ class TeacherObservationsCfg:
     @configclass
     class PolicyCfg(ObsGroup):
         """Observations for policy group."""
-        # observation terms (order preserved)
-        teacher = ObsTerm(
-            func=AtecTeacherObservations,
-            params={
-                "asset_cfg":SceneEntityCfg("robot"),
-            }
-        )
+        # proprio terms
+        base_lin_vel = ObsTerm(func=mdp.base_lin_vel, noise=Unoise(n_min=-0.1, n_max=0.1))
+        base_ang_vel = ObsTerm(func=mdp.base_ang_vel, noise=Unoise(n_min=-0.2, n_max=0.2))
+        velocity_commands = ObsTerm(func=mdp.generated_commands, params={"command_name": "base_velocity"}, clip=(-100.0, 100.0), scale=1.0)
+        projected_gravity = ObsTerm(func=mdp.projected_gravity, noise=Unoise(n_min=-0.05, n_max=0.05))
+        joint_pos = ObsTerm(func=mdp.joint_pos_rel, params={"asset_cfg": SceneEntityCfg("robot", joint_names=".*", preserve_order=True)}, noise=Unoise(n_min=-0.01, n_max=0.01))
+        joint_vel = ObsTerm(func=mdp.joint_vel_rel, params={"asset_cfg": SceneEntityCfg("robot", joint_names=".*", preserve_order=True)}, noise=Unoise(n_min=-1.5, n_max=1.5))
+        actions = ObsTerm(func=mdp.last_action)
+        
+        # extero terms
+        lidar_scan = ObsTerm(func=safe_lidar_scan, params={"sensor_cfg": SceneEntityCfg("lidar_sensor")})
+
+        def __post_init__(self):
+            self.enable_corruption = False
+            self.concatenate_terms = True
+
     policy: PolicyCfg = PolicyCfg()
 
 @configclass
@@ -156,12 +172,6 @@ class StudentObservationsCfg:
 class StudentObservationsCfg_TRAIN(StudentObservationsCfg):
     @configclass
     class PrivilegedObservationsCfg(ObsGroup):
-        extreme_parkour_observations = ObsTerm(
-            func=AtecTeacherObservations,
-            params={            
-            "asset_cfg":SceneEntityCfg("robot"),
-            }
-        )
         def __post_init__(self):
             self.enable_corruption = False
             self.concatenate_terms = True

@@ -14,11 +14,16 @@ from isaaclab.assets import ArticulationCfg
 @configclass
 class ParkourTeacherSceneCfg(ParkourDefaultSceneCfg):
     robot: ArticulationCfg = UNITREE_B2_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
-    height_scanner = RayCasterCfg(
+    lidar_sensor = RayCasterCfg(
         prim_path="{ENV_REGEX_NS}/Robot/base_link",
-        offset=RayCasterCfg.OffsetCfg(pos=(0.375, 0.0, 20.0)),
-        ray_alignment="yaw",
-        pattern_cfg=patterns.GridPatternCfg(resolution=0.15, size=[1.65, 1.5]),
+        update_period=0.1,
+        pattern_cfg=patterns.LidarPatternCfg(
+            vertical_fov_range=(-20.0, 20.0),
+            horizontal_fov_range=(-180.0, 180.0),
+            horizontal_res=1.0,
+            channels=16,
+        ),
+        max_distance=10.0,
         debug_vis=False,
         mesh_prim_paths=["/World/ground"],
     )
@@ -36,7 +41,7 @@ class ParkourTeacherSceneCfg(ParkourDefaultSceneCfg):
         
 @configclass
 class UnitreeB2TeacherParkourEnvCfg(ParkourManagerBasedRLEnvCfg):
-    scene: ParkourTeacherSceneCfg = ParkourTeacherSceneCfg(num_envs=6144, env_spacing=1.)
+    scene: ParkourTeacherSceneCfg = ParkourTeacherSceneCfg(num_envs=256, env_spacing=1.)
     # Basic settings
     observations: TeacherObservationsCfg = TeacherObservationsCfg()
     actions: ActionsCfg = ActionsCfg()
@@ -58,7 +63,7 @@ class UnitreeB2TeacherParkourEnvCfg(ParkourManagerBasedRLEnvCfg):
         self.sim.physics_material = self.scene.terrain.physics_material
         self.sim.physx.gpu_max_rigid_patch_count = 10 * 2**18
         # update sensor update periods
-        self.scene.height_scanner.update_period = self.sim.dt * self.decimation
+        self.scene.lidar_sensor.update_period = self.sim.dt * self.decimation
         self.scene.contact_forces.update_period = self.sim.dt * self.decimation
         self.scene.terrain.terrain_generator.curriculum = True
         self.actions.joint_pos.use_delay = False
