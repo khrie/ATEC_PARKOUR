@@ -188,7 +188,7 @@ class StudentObservationsCfg_TRAIN(StudentObservationsCfg):
             "sensor_cfg":SceneEntityCfg("depth_camera"),
             "resize": (58, 87),
             "buffer_len": 2,
-            "debug_vis":True
+            "debug_vis":False
             },
         )
         def __post_init__(self):

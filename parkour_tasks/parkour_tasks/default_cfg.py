@@ -10,7 +10,9 @@ from parkour_tasks.extreme_parkour_task.config.go2 import agents
 from isaaclab.sensors import RayCasterCameraCfg
 from isaaclab.sensors.ray_caster.patterns import PinholeCameraPatternCfg
 from isaaclab.envs import ViewerCfg
-import os, torch 
+import os, torch
+import numpy as np
+from scipy.spatial.transform import Rotation as R
 from parkour_isaaclab.actuators.parkour_actuator_cfg import ParkourDCMotorCfg
 
 def quat_from_euler_xyz_tuple(roll: torch.Tensor, pitch: torch.Tensor, yaw: torch.Tensor) -> tuple:
@@ -85,17 +87,17 @@ class ParkourDefaultSceneCfg(InteractiveSceneCfg):
         )
 
 ## we are now using a raycaster based camera, not a pinhole camera. see tail issue https://github.com/isaac-sim/IsaacLab/issues/719
-CAMERA_CFG = RayCasterCameraCfg( 
+CAMERA_CFG = RayCasterCameraCfg(
     prim_path= '{ENV_REGEX_NS}/Robot/base',
-    data_types=["distance_to_camera"],
+    data_types=["distance_to_image_plane"],
     offset=RayCasterCameraCfg.OffsetCfg(
-        pos=(0.33, 0.0, 0.08), 
-        rot=quat_from_euler_xyz_tuple(*tuple(torch.deg2rad(torch.tensor([180,70,-90])))), 
-        convention="ros"
+        pos=(0.4216099977493286, 0.02500000037252903, 0.06185099855065346),
+        rot=tuple(float(x) for x in R.from_euler("xyz", [0.0, np.pi / 6, 0.0]).as_quat(scalar_first=True)),
+        convention="world"
         ),
     depth_clipping_behavior = 'max',
     pattern_cfg = PinholeCameraPatternCfg(
-        focal_length=11.041, 
+        focal_length=24.0,
         horizontal_aperture=20.955,
         vertical_aperture = 12.240,
         height=60,

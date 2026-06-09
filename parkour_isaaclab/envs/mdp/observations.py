@@ -161,7 +161,7 @@ class image_features(ManagerTermBase):
     def reset(self, env_ids: Sequence[int] | None = None) -> None:
         if env_ids is None:
             env_ids = torch.arange(0, self.num_envs)
-        depth_images = self.camera_sensor.data.output["distance_to_camera"].squeeze(-1)[env_ids]
+        depth_images = self.camera_sensor.data.output["distance_to_image_plane"].squeeze(-1)[env_ids]
         for depth_image, env_id in zip(depth_images, env_ids):
             processed_image = self._process_depth_image(depth_image)
             self.depth_buffer[env_id] = torch.stack([processed_image]* 2, dim=0)
@@ -175,7 +175,7 @@ class image_features(ManagerTermBase):
         debug_vis:bool
         ):
         if env.common_step_counter % 5 == 0:
-            depth_images = self.camera_sensor.data.output["distance_to_camera"].squeeze(-1)
+            depth_images = self.camera_sensor.data.output["distance_to_image_plane"].squeeze(-1)
             for env_id, depth_image in enumerate(depth_images):
                 processed_image = self._process_depth_image(depth_image)
                 self.depth_buffer[env_id] = torch.cat([self.depth_buffer[env_id, 1:], 
