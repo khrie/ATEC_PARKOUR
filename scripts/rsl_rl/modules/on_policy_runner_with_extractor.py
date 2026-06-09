@@ -574,7 +574,7 @@ class OnPolicyRunnerWithExtractor(OnPolicyRunner):
 
     def load(self, path: str, load_optimizer: bool = True):
         loaded_dict = torch.load(path, weights_only=False)
-        resumed_training = self.alg.policy.load_state_dict(loaded_dict["model_state_dict"])
+        resumed_training = self.alg.policy.load_state_dict(loaded_dict["model_state_dict"], strict=False)
         self.alg.estimator.load_state_dict(loaded_dict['estimator_state_dict'])
         if self.alg.rnd:
             self.alg.rnd.load_state_dict(loaded_dict["rnd_state_dict"])

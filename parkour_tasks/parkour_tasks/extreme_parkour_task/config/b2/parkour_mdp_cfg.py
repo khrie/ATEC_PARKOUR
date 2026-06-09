@@ -147,10 +147,26 @@ class StudentObservationsCfg:
             self.enable_corruption = False
             self.concatenate_terms = False
 
+    @configclass
+    class DepthCameraCfg(ObsGroup):
+        depth_cam = ObsTerm(
+            func=observations.image_features,
+            params={
+            "sensor_cfg":SceneEntityCfg("depth_camera"),
+            "resize": (58, 87),
+            "buffer_len": 2,
+            "debug_vis":False
+            },
+        )
+        def __post_init__(self):
+            self.enable_corruption = False
+            self.concatenate_terms = True
+
     # observation groups
     proprio: ProprioObservationsCfg = ProprioObservationsCfg()
     extero: ExteroObservationsCfg = ExteroObservationsCfg()
     image: ImageObservationsCfg = ImageObservationsCfg()
+    depth_camera: DepthCameraCfg = DepthCameraCfg()
 
 @configclass
 class StudentObservationsCfg_TRAIN(StudentObservationsCfg):
@@ -180,24 +196,9 @@ class StudentObservationsCfg_TRAIN(StudentObservationsCfg):
             self.enable_corruption = False
             self.concatenate_terms = True
 
-    @configclass
-    class DepthCameraCfg(ObsGroup):
-        depth_cam = ObsTerm(
-            func=observations.image_features,
-            params={
-            "sensor_cfg":SceneEntityCfg("depth_camera"),
-            "resize": (58, 87),
-            "buffer_len": 2,
-            "debug_vis":False
-            },
-        )
-        def __post_init__(self):
-            self.enable_corruption = False
-            self.concatenate_terms = True
 
     teacher: PrivilegedObservationsCfg = PrivilegedObservationsCfg()
     delta_yaw_ok: DeltaYawOkCfg = DeltaYawOkCfg()
-    depth_camera: DepthCameraCfg = DepthCameraCfg()
 
 
 @configclass

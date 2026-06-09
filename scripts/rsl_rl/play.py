@@ -132,21 +132,24 @@ def main():
         depth_encoder = ppo_runner.get_depth_encoder_inference_policy(device=env.device)
         policy_nn = ppo_runner.alg.depth_actor
         export_model_dir = os.path.join(os.path.dirname(resume_path), "exported_deploy")
-        export_deploy_policy_as_jit(policy_nn, 
-                                    estimator,
-                                    depth_encoder,
-                                    ppo_runner.obs_normalizer, 
-                                    path=export_model_dir, 
-                                    filename="policy.pt")
-        export_deploy_policy_as_onnx(
-                            policy_nn, 
-                            estimator,
-                            depth_encoder,
-                            agent_cfg,
-                            normalizer=ppo_runner.obs_normalizer, 
-                            path=export_model_dir, 
-                            filename="policy.onnx"
-                        )
+        # try:
+        #     export_deploy_policy_as_jit(policy_nn, 
+        #                                 estimator,
+        #                                 depth_encoder,
+        #                                 ppo_runner.obs_normalizer, 
+        #                                 path=export_model_dir, 
+        #                                 filename="policy.pt")
+        #     export_deploy_policy_as_onnx(
+        #                         policy_nn, 
+        #                         estimator,
+        #                         depth_encoder,
+        #                         agent_cfg,
+        #                         normalizer=ppo_runner.obs_normalizer, 
+        #                         path=export_model_dir, 
+        #                         filename="policy.onnx"
+        #                     )
+        # except Exception as e:
+        #     print(f"[WARNING]: Failed to export policy: {e}")
 
     else:
         policy = ppo_runner.get_inference_policy(device=env.unwrapped.device)
@@ -164,7 +167,12 @@ def main():
     num_priv_explicit = estimator_paras["num_priv_explicit"]
     # reset environment
     obs_dict = env.get_observations()
-    obs = obs_dict["policy"] if "policy" in obs_dict.keys() else obs_dict
+    if "policy" in obs_dict.keys():
+        obs = obs_dict["policy"]
+    elif "proprio" in obs_dict.keys():
+        obs = obs_dict["proprio"]
+    else:
+        obs = obs_dict
     extras = {"observations": obs_dict}
     timestep = 0
     # simulate environment
@@ -190,7 +198,12 @@ def main():
                 # obs[:, num_prop+num_scan:num_prop+num_scan+num_priv_explicit] = estimator.inference(obs[:, :num_prop])
                 actions = policy(obs, hist_encoding=True, scandots_latent=depth_latent)
         obs_dict, _, _, extras = env.step(actions)
-        obs = obs_dict["policy"] if "policy" in obs_dict.keys() else obs_dict
+        if "policy" in obs_dict.keys():
+            obs = obs_dict["policy"]
+        elif "proprio" in obs_dict.keys():
+            obs = obs_dict["proprio"]
+        else:
+            obs = obs_dict
         if args_cli.video:
             timestep += 1
             # Exit the play loop after recording one video

@@ -259,5 +259,15 @@ class ActorCriticRMA(nn.Module):
         return value
 
     def load_state_dict(self, state_dict, strict=True):
+        if not strict:
+            keys_to_delete = []
+            model_state_dict = self.state_dict()
+            for k in state_dict.keys():
+                if k.startswith("critic") and k in model_state_dict:
+                    if state_dict[k].shape != model_state_dict[k].shape:
+                        keys_to_delete.append(k)
+            for k in keys_to_delete:
+                del state_dict[k]
+                
         super().load_state_dict(state_dict, strict=strict)
         return True

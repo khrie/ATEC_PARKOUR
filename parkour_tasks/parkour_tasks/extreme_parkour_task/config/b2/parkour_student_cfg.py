@@ -111,7 +111,7 @@ class UnitreeB2StudentParkourEnvCfg_EVAL(UnitreeB2StudentParkourEnvCfg):
             self.scene.terrain.terrain_generator.difficulty_range = (0.0,1.0)
         self.events.randomize_rigid_body_com = None
         self.events.randomize_rigid_body_mass = None
-        self.events.push_by_setting_velocity.interval_range_s = (6.,6.)
+        # self.events.push_by_setting_velocity.interval_range_s = (6.,6.)
         self.events.random_camera_position.params['rot_noise_range'] = {'pitch':(0, 1)}
         
         for key, sub_terrain in self.scene.terrain.terrain_generator.sub_terrains.items():
