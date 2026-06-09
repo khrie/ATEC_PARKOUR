@@ -54,10 +54,7 @@ from scripts.rsl_rl.modules.on_policy_runner_with_extractor import OnPolicyRunne
 from isaaclab.envs import DirectMARLEnv, multi_agent_to_single_agent
 from isaaclab.utils.assets import retrieve_file_path
 from isaaclab.utils.dict import print_dict
-try:
-    from isaaclab.utils.pretrained_checkpoint import get_published_pretrained_checkpoint
-except ImportError:
-    get_published_pretrained_checkpoint = None
+from isaaclab.utils.pretrained_checkpoint import get_published_pretrained_checkpoint
 from parkour_tasks.extreme_parkour_task.config.go2.agents.parkour_rl_cfg import ParkourRslRlOnPolicyRunnerCfg
 
 from scripts.rsl_rl.exporter import (
@@ -163,9 +160,7 @@ def main():
     num_scan = estimator_paras["num_scan"]
     num_priv_explicit = estimator_paras["num_priv_explicit"]
     # reset environment
-    obs_dict = env.get_observations()
-    obs = obs_dict["policy"] if "policy" in obs_dict.keys() else obs_dict
-    extras = {"observations": obs_dict}
+    obs, extras = env.get_observations()
     timestep = 0
     # simulate environment
     while simulation_app.is_running():
@@ -178,7 +173,7 @@ def main():
                 actions = policy(obs, hist_encoding = True)
             # env stepping
         else:
-            depth_camera = obs_dict['depth_camera'].to(env.device)
+            depth_camera = extras["observations"]['depth_camera'].to(env.device)
             with torch.inference_mode():
                 if env.unwrapped.common_step_counter %5 == 0:
                     obs_student = obs[:, :num_prop].clone()
@@ -189,8 +184,7 @@ def main():
                 obs[:, 6:8] = 1.5*yaw
                 # obs[:, num_prop+num_scan:num_prop+num_scan+num_priv_explicit] = estimator.inference(obs[:, :num_prop])
                 actions = policy(obs, hist_encoding=True, scandots_latent=depth_latent)
-        obs_dict, _, _, extras = env.step(actions)
-        obs = obs_dict["policy"] if "policy" in obs_dict.keys() else obs_dict
+        obs, _, _, extras = env.step(actions)
         if args_cli.video:
             timestep += 1
             # Exit the play loop after recording one video

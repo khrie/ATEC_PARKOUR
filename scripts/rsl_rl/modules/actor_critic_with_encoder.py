@@ -113,12 +113,6 @@ class Actor(nn.Module):
     def infer_priv_latent(self, obs):
         priv = obs[:, self.num_prop + self.num_scan + self.num_priv_explicit: self.num_prop + self.num_scan + self.num_priv_explicit + self.num_priv_latent]
         return self.priv_encoder(priv)
-
-    def update_normalization(self, obs):
-        pass
-
-    def reset(self, dones=None):
-        pass
     
     def infer_hist_latent(self, obs):
         hist = obs[:, -self.num_hist*self.num_prop:]
@@ -171,8 +165,6 @@ class ActorCriticRMA(nn.Module):
                 critic_layers.append(nn.Linear(critic_hidden_dims[layer_index], critic_hidden_dims[layer_index + 1]))
                 critic_layers.append(activation)
         self.critic = nn.Sequential(*critic_layers)
-        self.critic.update_normalization = lambda obs: None
-        self.critic.reset = lambda dones=None: None
 
         print(f"Actor MLP: {self.actor}")
         print(f"Critic MLP: {self.critic}")
@@ -211,9 +203,6 @@ class ActorCriticRMA(nn.Module):
     @property
     def entropy(self):
         return self.distribution.entropy().sum(dim=-1)
-
-    def update_normalization(self, obs):
-        pass
 
     def update_distribution(self, observations, hist_encoding):
         mean = self.actor(observations, hist_encoding)

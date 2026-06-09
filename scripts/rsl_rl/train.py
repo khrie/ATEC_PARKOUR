@@ -84,11 +84,7 @@ from isaaclab.envs import (
     multi_agent_to_single_agent,
 )
 from isaaclab.utils.dict import print_dict
-from isaaclab.utils.io import dump_yaml
-import pickle
-def dump_pickle(path, obj):
-    with open(path, 'wb') as f:
-        pickle.dump(obj, f)
+from isaaclab.utils.io import dump_pickle, dump_yaml
 from parkour_tasks.extreme_parkour_task.config.go2.agents.parkour_rl_cfg import ParkourRslRlOnPolicyRunnerCfg
 from scripts.rsl_rl.vecenv_wrapper import ParkourRslRlVecEnvWrapper
 # import isaaclab_tasks  # noqa: F401
@@ -179,7 +175,7 @@ def main(env_cfg: ParkourManagerBasedRLEnv |ManagerBasedRLEnvCfg | DirectRLEnvCf
     if agent_cfg.resume or agent_cfg.algorithm.class_name == "DistillationWithExtractor":
         print(f"[INFO]: Loading model checkpoint from: {resume_path}")
         # load previously trained model
-        runner.load(resume_path, load_optimizer=agent_cfg.resume)
+        runner.load(resume_path)
     # dump the configuration into log-directory
     dump_yaml(os.path.join(log_dir, "params", "env.yaml"), env_cfg)
     dump_yaml(os.path.join(log_dir, "params", "agent.yaml"), agent_cfg)

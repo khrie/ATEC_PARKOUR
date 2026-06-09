@@ -2,7 +2,6 @@ from rsl_rl.env import VecEnv
 from parkour_isaaclab.envs import ParkourManagerBasedRLEnv
 import gymnasium as gym
 import torch
-from tensordict import TensorDict
 
 class ParkourRslRlVecEnvWrapper(VecEnv):
     def __init__(self, env: ParkourManagerBasedRLEnv, clip_actions: float | None = None):
@@ -96,13 +95,13 @@ class ParkourRslRlVecEnvWrapper(VecEnv):
     Properties
     """
 
-    def get_observations(self) -> TensorDict:
+    def get_observations(self) -> tuple[torch.Tensor, dict]:
         """Returns the current observations of the environment."""
         if hasattr(self.unwrapped, "observation_manager"):
             obs_dict = self.unwrapped.observation_manager.compute()
         else:
             obs_dict = self.unwrapped._get_observations()
-        return TensorDict(obs_dict, batch_size=[self.num_envs], device=self.device)
+        return obs_dict["policy"], {"observations": obs_dict}
 
     @property
     def episode_length_buf(self) -> torch.Tensor:
@@ -125,13 +124,13 @@ class ParkourRslRlVecEnvWrapper(VecEnv):
     def seed(self, seed: int = -1) -> int:  # noqa: D102
         return self.unwrapped.seed(seed)
 
-    def reset(self) -> tuple[TensorDict, dict]:  # noqa: D102
+    def reset(self) -> tuple[torch.Tensor, dict]:  # noqa: D102
         # reset the environment
         obs_dict, _ = self.env.reset()
         # return observations
-        return TensorDict(obs_dict, batch_size=[self.num_envs], device=self.device)
+        return obs_dict["policy"], {"observations": obs_dict}
 
-    def step(self, actions: torch.Tensor) -> tuple[TensorDict, torch.Tensor, torch.Tensor, dict]:
+    def step(self, actions: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, dict]:
         # clip actions
         if self.clip_actions is not None:
             actions = torch.clamp(actions, -self.clip_actions, self.clip_actions)
@@ -139,13 +138,16 @@ class ParkourRslRlVecEnvWrapper(VecEnv):
         obs_dict, rew, terminated, truncated, extras = self.env.step(actions)
         # compute dones for compatibility with RSL-RL
         dones = (terminated | truncated).to(dtype=torch.long)
+        # move extra observations to the extras dict
+        obs = obs_dict["policy"]
+        extras["observations"] = obs_dict
         # move time out information to the extras dict
         # this is only needed for infinite horizon tasks
         if not self.unwrapped.cfg.is_finite_horizon:
             extras["time_outs"] = truncated
 
         # return the step information
-        return TensorDict(obs_dict, batch_size=[self.num_envs], device=self.device), rew, dones, extras
+        return obs, rew, dones, extras
 
     def close(self):  # noqa: D102
         return self.env.close()

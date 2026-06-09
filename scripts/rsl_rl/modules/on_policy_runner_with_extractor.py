@@ -12,12 +12,12 @@ from rsl_rl.env import VecEnv
 from rsl_rl.modules import (
     EmpiricalNormalization,
 )
-from rsl_rl.runners.on_policy_runner import OnPolicyRunner
 from .actor_critic_with_encoder import ActorCriticRMA
+from rsl_rl.utils import store_code_state
+from rsl_rl.runners.on_policy_runner import OnPolicyRunner
 from .feature_extractors import DefaultEstimator
 from .ppo_with_extractor import PPOWithExtractor 
 from .distillation_with_extractor import DistillationWithExtractor 
-
 from copy import copy 
 import warnings 
 
@@ -40,23 +40,22 @@ class OnPolicyRunnerWithExtractor(OnPolicyRunner):
         else:
             raise ValueError(f"Training type not found for algorithm {self.alg_cfg['class_name']}.")
 
-        obs_dict = self.env.get_observations()
-        obs = obs_dict["policy"] if "policy" in obs_dict.keys() else obs_dict
+        obs, extras = self.env.get_observations()
         num_obs = obs.shape[1]
         
         if self.training_type == "rl":
-            if "critic" in obs_dict.keys():
+            if "critic" in extras["observations"]:
                 self.privileged_obs_type = "critic"  # actor-critic reinforcement learnig, e.g., PPO
             else:
                 self.privileged_obs_type = None
         if self.training_type == "distillation":
-            if "teacher" in obs_dict.keys():
+            if "teacher" in extras["observations"]:
                 self.privileged_obs_type = "teacher"  # policy distillation
             else:
                 self.privileged_obs_type = None
 
         if self.privileged_obs_type is not None:
-            num_privileged_obs = obs_dict[self.privileged_obs_type].shape[1]
+            num_privileged_obs = extras["observations"][self.privileged_obs_type].shape[1]
         else:
             num_privileged_obs = num_obs
         estimator_class = eval(self.estimator_cfg.pop("class_name"))
@@ -97,31 +96,18 @@ class OnPolicyRunnerWithExtractor(OnPolicyRunner):
                                                     policy_cfg = self.policy_cfg, 
                                                     max_grad_norm = self.alg_cfg['max_grad_norm'],
                                                     device=self.device, 
-                                                    multi_gpu_cfg=getattr(self, "multi_gpu_cfg", None)
+                                                    multi_gpu_cfg=self.multi_gpu_cfg
                                                     )
         else:
             self.dagger_update_freq = self.alg_cfg.pop("dagger_update_freq")
-            obs_dict = self.env.get_observations()
-            from rsl_rl.storage.rollout_storage import RolloutStorage
-            storage = RolloutStorage(
-                training_type=self.training_type,
-                num_envs=self.env.num_envs,
-                num_transitions_per_env=self.cfg["num_steps_per_env"],
-                obs=obs_dict,
-                actions_shape=[self.env.num_actions],
-                device=self.device
-            )
             alg_class = eval(self.alg_cfg.pop("class_name"))
             self.alg: PPOWithExtractor = alg_class(
-                                                    actor=policy.actor,
-                                                    critic=policy.critic,
-                                                    storage=storage,
-                                                    policy=policy, 
-                                                    estimator=estimator, 
-                                                    estimator_paras=self.estimator_cfg,
+                                                    policy, 
+                                                    estimator, 
+                                                    self.estimator_cfg,
                                                     **self.alg_cfg, 
                                                     device=self.device, 
-                                                    multi_gpu_cfg=getattr(self, "multi_gpu_cfg", None)
+                                                    multi_gpu_cfg=self.multi_gpu_cfg
                                                     )
 
         self.num_steps_per_env = self.cfg["num_steps_per_env"]
@@ -137,7 +123,15 @@ class OnPolicyRunnerWithExtractor(OnPolicyRunner):
             self.obs_normalizer = torch.nn.Identity().to(self.device)  # no normalization
             self.privileged_obs_normalizer = torch.nn.Identity().to(self.device)  # no normalization
         if self.depth_encoder_cfg is None:
-            pass
+
+            self.alg.init_storage(
+                self.training_type,
+                self.env.num_envs,
+                self.num_steps_per_env,
+                [num_obs],
+                [num_privileged_obs],
+                [self.env.num_actions],
+            )
 
         self.disable_logs = self.is_distributed and self.gpu_global_rank != 0
         # Logging
@@ -180,9 +174,8 @@ class OnPolicyRunnerWithExtractor(OnPolicyRunner):
             )
 
         # start learning
-        obs_dict = self.env.get_observations()
-        obs = obs_dict["policy"] if "policy" in obs_dict.keys() else obs_dict
-        privileged_obs = obs_dict.get(self.privileged_obs_type, obs) if (self.privileged_obs_type is not None and (isinstance(obs_dict, dict) or hasattr(obs_dict, 'get'))) else obs
+        obs, extras = self.env.get_observations()
+        privileged_obs = extras["observations"].get(self.privileged_obs_type, obs)
         obs, privileged_obs = obs.to(self.device), privileged_obs.to(self.device)
         self.train_mode()  # switch to train mode (for dropout for example)
 
@@ -218,20 +211,14 @@ class OnPolicyRunnerWithExtractor(OnPolicyRunner):
             with torch.inference_mode():
                 for _ in range(self.num_steps_per_env):
                     # Sample actions
-                    actions = self.alg.act(obs_dict, hist_encoding=hist_encoding, privileged_obs_type=self.privileged_obs_type)
+                    actions = self.alg.act(obs, privileged_obs, hist_encoding)
                     # Step the environment
-                    obs_dict, rewards, dones, infos = self.env.step(actions.to(self.env.device))
-                    # Extract tensors from dict
-                    obs = obs_dict["policy"] if "policy" in obs_dict.keys() else obs_dict
+                    obs, rewards, dones, infos = self.env.step(actions.to(self.env.device))
                     # Move to device
                     obs, rewards, dones = (obs.to(self.device), rewards.to(self.device), dones.to(self.device))
                     # perform normalization
                     obs = self.obs_normalizer(obs)
-                    if self.privileged_obs_type is not None and self.privileged_obs_type in obs_dict.keys():
-                        privileged_obs = self.privileged_obs_normalizer(
-                            obs_dict[self.privileged_obs_type].to(self.device)
-                        )
-                    elif self.privileged_obs_type is not None and "observations" in infos and self.privileged_obs_type in infos["observations"]:
+                    if self.privileged_obs_type is not None:
                         privileged_obs = self.privileged_obs_normalizer(
                             infos["observations"][self.privileged_obs_type].to(self.device)
                         )
@@ -239,7 +226,7 @@ class OnPolicyRunnerWithExtractor(OnPolicyRunner):
                         privileged_obs = obs
 
                     # process the step
-                    self.alg.process_env_step(obs_dict, rewards, dones, infos)
+                    self.alg.process_env_step(rewards, dones, infos)
 
                     # Extract intrinsic rewards (only for logging)
                     intrinsic_rewards = self.alg.intrinsic_rewards if self.alg.rnd else None
@@ -302,7 +289,12 @@ class OnPolicyRunnerWithExtractor(OnPolicyRunner):
             ep_infos.clear()
             # Save code state
             if it == start_iter and not self.disable_logs:
-                pass
+                # obtain all the diff files
+                git_file_paths = store_code_state(self.log_dir, self.git_status_repos)
+                # if possible store them to wandb
+                if self.logger_type in ["wandb", "neptune"] and git_file_paths:
+                    for path in git_file_paths:
+                        self.writer.save_file(path)
 
         # Save the final model after training
         if self.log_dir is not None and not self.disable_logs:
@@ -335,11 +327,10 @@ class OnPolicyRunnerWithExtractor(OnPolicyRunner):
             else:
                 raise ValueError("Logger type not found. Please choose 'neptune', 'wandb' or 'tensorboard'.")
 
-        obs_dict = self.env.get_observations()
+        obs, extras = self.env.get_observations()
         additional_obs = {}
-        additional_obs["delta_yaw_ok"] = obs_dict['delta_yaw_ok'].to(self.device)
-        additional_obs["depth_camera"] = obs_dict['depth_camera'].to(self.device)
-        obs = obs_dict["policy"] if "policy" in obs_dict.keys() else obs_dict
+        additional_obs["delta_yaw_ok"] = extras['observations']['delta_yaw_ok'].to(self.device)
+        additional_obs["depth_camera"] = extras["observations"]['depth_camera'].to(self.device)
         obs = obs.to(self.device)
 
         self.alg.depth_encoder.train()
@@ -374,25 +365,22 @@ class OnPolicyRunnerWithExtractor(OnPolicyRunner):
                 with torch.no_grad():
                     actions_teacher = self.alg.policy.act_inference(obs, hist_encoding=True, scandots_latent=None)
                     delta_yaw_ok_buffer.append(torch.nonzero(additional_obs["delta_yaw_ok"]).size(0) / additional_obs["delta_yaw_ok"].numel())
-                mask = additional_obs["delta_yaw_ok"].squeeze(-1)
-                obs[mask, 6:8] = yaw.detach()[mask]
+                obs[additional_obs["delta_yaw_ok"], 6:8] = yaw.detach()[additional_obs["delta_yaw_ok"]]
                 actions_student = self.alg.depth_actor(obs, hist_encoding=True, scandots_latent=depth_latent)
                 actions_buffer.append(actions_teacher.detach() - actions_student)
                 
                 if it < num_pretrain_iter:
                     # Step the environment
-                    obs_dict, _, dones, infos = self.env.step(actions_teacher.detach().to(self.env.device))
-                    obs = obs_dict["policy"] if "policy" in obs_dict.keys() else obs_dict
+                    obs, _, dones, infos = self.env.step(actions_teacher.detach().to(self.env.device))
                     # Move to device
                     obs, dones = (obs.to(self.device), dones.to(self.device))
                 else:
                     # Step the environment
-                    obs_dict, _, dones, infos = self.env.step(actions_student.detach().to(self.env.device))
-                    obs = obs_dict["policy"] if "policy" in obs_dict.keys() else obs_dict
+                    obs, _, dones, infos = self.env.step(actions_student.detach().to(self.env.device))
                     # Move to device
                     obs, dones = (obs.to(self.device), dones.to(self.device))
-                additional_obs['delta_yaw_ok'] = obs_dict['delta_yaw_ok']
-                additional_obs['depth_camera'] = obs_dict['depth_camera']
+                additional_obs['delta_yaw_ok'] = infos["observations"]['delta_yaw_ok']
+                additional_obs['depth_camera'] = infos["observations"]['depth_camera']
                 # perform normalization
                 obs = self.obs_normalizer(obs)
                 if self.log_dir is not None:
@@ -433,7 +421,12 @@ class OnPolicyRunnerWithExtractor(OnPolicyRunner):
             ep_infos.clear()
             # Save code state
             if it == start_iter and not self.disable_logs:
-                pass
+                # obtain all the diff files
+                git_file_paths = store_code_state(self.log_dir, self.git_status_repos)
+                # if possible store them to wandb
+                if self.logger_type in ["wandb", "neptune"] and git_file_paths:
+                    for path in git_file_paths:
+                        self.writer.save_file(path)
 
         # Save the final model after training
         if self.log_dir is not None and not self.disable_logs:
@@ -621,73 +614,3 @@ class OnPolicyRunnerWithExtractor(OnPolicyRunner):
                 self.obs_normalizer.to(device)
             policy = lambda x: self.alg.depth_actor(self.obs_normalizer(x))  # noqa: E731
         return policy
-
-    def add_git_repo_to_log(self, repo_file_path: str):
-        pass
-
-    def train_mode(self):
-        self.alg.policy.train()
-        
-    def eval_mode(self):
-        self.alg.policy.eval()
-        
-    def log(self, locs, width=80, pad=35):
-        self.tot_timesteps = self.tot_timesteps + self.num_steps_per_env * self.env.num_envs
-        self.tot_time = self.tot_time + locs.get('collection_time', 0.0) + locs.get('learn_time', 0.0)
-        iteration_time = locs.get('collection_time', 0.0) + locs.get('learn_time', 0.0)
-
-        ep_infos = locs.get('ep_infos', [])
-        ep_string = ""
-        if ep_infos:
-            for key in ep_infos[0]:
-                infotensor = torch.tensor([], device=self.device)
-                for ep_info in ep_infos:
-                    if key not in ep_info: continue
-                    if not isinstance(ep_info[key], torch.Tensor):
-                        ep_info[key] = torch.Tensor([ep_info[key]])
-                    if len(ep_info[key].shape) == 0:
-                        ep_info[key] = ep_info[key].unsqueeze(0)
-                    infotensor = torch.cat((infotensor, ep_info[key].to(self.device)))
-                value = torch.mean(infotensor)
-                if self.writer is not None:
-                    self.writer.add_scalar('Episode/' + key, value, locs['it'])
-                ep_string += f"""{f'Mean episode {key}:':>{pad}} {value:.4f}\n"""
-                
-        fps = int(self.num_steps_per_env * self.env.num_envs / (iteration_time + 1e-6))
-        loss_dict = locs.get('loss_dict', {})
-        
-        if self.writer is not None:
-            for k, v in loss_dict.items():
-                self.writer.add_scalar(f'Loss/{k}', v, locs['it'])
-            self.writer.add_scalar('Loss/learning_rate', self.alg.learning_rate, locs['it'])
-            self.writer.add_scalar('Perf/total_fps', fps, locs['it'])
-            self.writer.add_scalar('Perf/collection time', locs.get('collection_time', 0.0), locs['it'])
-            self.writer.add_scalar('Perf/learning_time', locs.get('learn_time', 0.0), locs['it'])
-            if len(locs.get('rewbuffer', [])) > 0:
-                self.writer.add_scalar('Train/mean_reward', statistics.mean(locs['rewbuffer']), locs['it'])
-                self.writer.add_scalar('Train/mean_episode_length', statistics.mean(locs['lenbuffer']), locs['it'])
-
-        str_title = f" \033[1m Learning iteration {locs.get('it', 0)}/{locs.get('tot_iter', 0)} \033[0m "
-        rewbuffer = locs.get('rewbuffer', [])
-        lenbuffer = locs.get('lenbuffer', [])
-        
-        log_string = (f"""{'#' * width}\n"""
-                      f"""{str_title.center(width, ' ')}\n\n"""
-                      f"""{'Computation:':>{pad}} {fps:.0f} steps/s (collection: {locs.get('collection_time', 0.0):.3f}s, learning {locs.get('learn_time', 0.0):.3f}s)\n""")
-        
-        for loss_k, loss_v in loss_dict.items():
-            log_string += f"""{f'{loss_k}:':>{pad}} {loss_v:.4f}\n"""
-            
-        if len(rewbuffer) > 0:
-            log_string += f"""{'Mean reward:':>{pad}} {statistics.mean(rewbuffer):.2f}\n"""
-            log_string += f"""{'Mean episode length:':>{pad}} {statistics.mean(lenbuffer):.2f}\n"""
-
-        log_string += ep_string
-        eta = self.tot_time / (max(1, locs.get('it', 0) + 1 - locs.get('start_iter', 0))) * (locs.get('tot_iter', 0) - locs.get('it', 0))
-        
-        log_string += (f"""{'-' * width}\n"""
-                       f"""{'Total timesteps:':>{pad}} {self.tot_timesteps}\n"""
-                       f"""{'Iteration time:':>{pad}} {iteration_time:.2f}s\n"""
-                       f"""{'Total time:':>{pad}} {self.tot_time:.2f}s\n"""
-                       f"""{'ETA:':>{pad}} {eta:.1f}s\n""")
-        print(log_string)

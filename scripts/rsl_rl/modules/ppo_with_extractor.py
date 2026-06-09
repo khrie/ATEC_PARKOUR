@@ -13,9 +13,6 @@ class PPOWithExtractor(PPO):
 
     def __init__(
         self,
-        actor,
-        critic,
-        storage,
         policy,
         estimator,
         estimator_paras,
@@ -28,7 +25,6 @@ class PPOWithExtractor(PPO):
         entropy_coef=0.0,
         learning_rate=1e-3,
         max_grad_norm=1.0,
-        optimizer="adam",
         use_clipped_value_loss=True,
         schedule="fixed",
         desired_kl=0.01,
@@ -39,35 +35,32 @@ class PPOWithExtractor(PPO):
         # Symmetry parameters
         symmetry_cfg: dict | None = None,
         # Distributed training parameters
-        priv_reg_coef_schedual = [0, 0, 0, 1],
+        priv_reg_coef_schedual = [0, 0, 0],
         multi_gpu_cfg: dict | None = None,
-        **kwargs,
     ):
         super().__init__(
-            actor=actor,
-            critic=critic,
-            storage=storage,
-            num_learning_epochs=num_learning_epochs,
-            num_mini_batches=num_mini_batches,
-            clip_param=clip_param,
-            gamma=gamma,
-            lam=lam,
-            value_loss_coef=value_loss_coef,
-            entropy_coef=entropy_coef,
-            learning_rate=learning_rate,
-            max_grad_norm=max_grad_norm,
-            optimizer=optimizer,
-            use_clipped_value_loss=use_clipped_value_loss,
-            schedule=schedule,
-            desired_kl=desired_kl,
-            normalize_advantage_per_mini_batch=normalize_advantage_per_mini_batch,
-            device=device,
-            rnd_cfg=rnd_cfg,
-            symmetry_cfg=symmetry_cfg,
-            multi_gpu_cfg=multi_gpu_cfg,
-        )
-        self.policy = policy
-
+            policy, 
+            num_learning_epochs,
+            num_mini_batches,
+            clip_param,
+            gamma,
+            lam,
+            value_loss_coef,
+            entropy_coef,
+            learning_rate,
+            max_grad_norm,
+            use_clipped_value_loss,
+            schedule,
+            desired_kl,
+            device,
+            normalize_advantage_per_mini_batch,
+            # RND parameters
+            rnd_cfg,
+            # Symmetry parameters
+            symmetry_cfg,
+            # Distributed training parameters
+            multi_gpu_cfg,
+            )
 
         self.estimator: nn.Module = estimator
         print(f"estimator MLP: {estimator}")
@@ -82,10 +75,7 @@ class PPOWithExtractor(PPO):
         self.counter = 0
 
 
-    def act(self, obs_dict, hist_encoding=False, privileged_obs_type=None):
-        obs = obs_dict["policy"] if "policy" in obs_dict.keys() else obs_dict
-        critic_obs = obs_dict.get(privileged_obs_type, obs) if (privileged_obs_type is not None and hasattr(obs_dict, 'get')) else obs
-        
+    def act(self, obs, critic_obs, hist_encoding=False):
         if self.policy.is_recurrent:
             self.transition.hidden_states = self.policy.get_hidden_states()
         # compute the actions and values
@@ -101,9 +91,9 @@ class PPOWithExtractor(PPO):
         self.transition.actions_log_prob = self.policy.get_actions_log_prob(self.transition.actions).detach()
         self.transition.action_mean = self.policy.action_mean.detach()
         self.transition.action_sigma = self.policy.action_std.detach()
-        self.transition.distribution_params = [self.transition.action_mean, self.transition.action_sigma]
         # need to record obs and critic_obs before env.step()
-        self.transition.observations = obs_dict
+        self.transition.observations = obs
+        self.transition.privileged_observations = critic_obs
 
         return self.transition.actions
     
@@ -131,19 +121,21 @@ class PPOWithExtractor(PPO):
         else:
             generator = self.storage.mini_batch_generator(self.num_mini_batches, self.num_learning_epochs)
 
-        for batch in generator:
-            obs_batch = batch.observations["policy"] if "policy" in batch.observations.keys() else batch.observations
-            critic_obs_batch = batch.observations["critic"] if "critic" in batch.observations.keys() else obs_batch
-            actions_batch = batch.actions
-            target_values_batch = batch.values
-            advantages_batch = batch.advantages
-            returns_batch = batch.returns
-            old_actions_log_prob_batch = batch.old_actions_log_prob
-            old_mu_batch = batch.old_distribution_params[0]
-            old_sigma_batch = batch.old_distribution_params[1]
-            hid_states_batch = [None, None]
-            masks_batch = None
-            rnd_state_batch = batch.observations["rnd_state"] if "rnd_state" in batch.observations.keys() else None
+        # iterate over batches
+        for (
+            obs_batch,
+            critic_obs_batch,
+            actions_batch,
+            target_values_batch,
+            advantages_batch,
+            returns_batch,
+            old_actions_log_prob_batch,
+            old_mu_batch,
+            old_sigma_batch,
+            hid_states_batch,
+            masks_batch,
+            rnd_state_batch,
+        ) in generator:
 
             # number of augmentations per sample
             # we start with 1 and increase it if we use symmetry augmentation
@@ -375,19 +367,20 @@ class PPOWithExtractor(PPO):
             generator = self.storage.recurrent_mini_batch_generator(self.num_mini_batches, self.num_learning_epochs)
         else:
             generator = self.storage.mini_batch_generator(self.num_mini_batches, self.num_learning_epochs)
-        for batch in generator:
-            obs_batch = batch.observations["policy"] if "policy" in batch.observations.keys() else batch.observations
-            critic_obs_batch = batch.observations["critic"] if "critic" in batch.observations.keys() else obs_batch
-            actions_batch = batch.actions
-            target_values_batch = batch.values
-            advantages_batch = batch.advantages
-            returns_batch = batch.returns
-            old_actions_log_prob_batch = batch.old_actions_log_prob
-            old_mu_batch = batch.old_distribution_params[0]
-            old_sigma_batch = batch.old_distribution_params[1]
-            hid_states_batch = [None, None]
-            masks_batch = None
-            rnd_state_batch = batch.observations["rnd_state"] if "rnd_state" in batch.observations.keys() else None
+        for (
+            obs_batch,
+            critic_obs_batch,
+            actions_batch,
+            target_values_batch,
+            advantages_batch,
+            returns_batch,
+            old_actions_log_prob_batch,
+            old_mu_batch,
+            old_sigma_batch,
+            hid_states_batch,
+            masks_batch,
+            rnd_state_batch,
+        ) in generator:
             with torch.inference_mode():
                 self.policy.act(obs_batch, 
                                 hist_encoding=True, 

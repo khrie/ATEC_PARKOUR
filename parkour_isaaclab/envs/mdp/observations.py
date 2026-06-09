@@ -41,10 +41,7 @@ class ExtremeParkourObservations(ManagerTermBase):
         self.delta_next_yaw = torch.zeros(self.num_envs, device=self.device)
         self.measured_heights = torch.zeros(self.num_envs, 132, device=self.device)
         self.env = env
-        try:
-            self.body_id = self.asset.find_bodies('base')[0]
-        except ValueError:
-            self.body_id = self.asset.find_bodies('base_link')[0]
+        self.body_id = self.asset.find_bodies('base')[0]
         
     def reset(self, env_ids: Sequence[int] | None = None) -> None:
         self._obs_history_buffer[env_ids, :, :] = 0. 
@@ -192,11 +189,8 @@ class image_features(ManagerTermBase):
                 rows.append(row)
 
             grid_img = np.vstack(rows)   
-            try:
-                cv2.imshow("depth_images_grid", grid_img)
-                cv2.waitKey(1)
-            except cv2.error:
-                pass
+            cv2.imshow("depth_images_grid", grid_img)
+            cv2.waitKey(1)
         return self.depth_buffer[:, -2].to(env.device)
 
     def _process_depth_image(self, depth_image):
@@ -232,4 +226,4 @@ class obervation_delta_yaw_ok(ManagerTermBase):
             asset: Articulation = env.scene[asset_cfg.name]
             _, _, yaw = euler_xyz_from_quat(asset.data.root_quat_w)
             self.delta_yaw = parkour_event.target_yaw - wrap_to_pi(yaw)
-        return (self.delta_yaw < threshold).unsqueeze(-1)
+        return self.delta_yaw < threshold
