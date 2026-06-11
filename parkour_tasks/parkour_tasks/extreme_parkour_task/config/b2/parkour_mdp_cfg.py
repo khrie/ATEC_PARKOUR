@@ -43,21 +43,42 @@ class ParkourEventsCfg:
         asset_name = 'robot',
         )
 
+from parkour_tasks.extreme_parkour_task.utils.atec_observation import AtecTeacherProprio, AtecTeacherExtero
+
 @configclass
 class TeacherObservationsCfg:
     """Observation specifications for the MDP."""
 
     @configclass
-    class PolicyCfg(ObsGroup):
-        """Observations for policy group."""
-        # observation terms (order preserved)
-        teacher = ObsTerm(
-            func=AtecTeacherObservations,
+    class ProprioObservationsCfg(ObsGroup):
+        """Observations for proprioception group."""
+        proprio = ObsTerm(
+            func=AtecTeacherProprio,
             params={
                 "asset_cfg":SceneEntityCfg("robot"),
             }
         )
-    policy: PolicyCfg = PolicyCfg()
+
+        def __post_init__(self):
+            self.enable_corruption = False
+            self.concatenate_terms = True
+
+    @configclass
+    class ExteroObservationsCfg(ObsGroup):
+        """Observations for exteroception group."""
+        extero = ObsTerm(
+            func=AtecTeacherExtero,
+            params={
+                "asset_cfg":SceneEntityCfg("robot"),
+            }
+        )
+
+        def __post_init__(self):
+            self.enable_corruption = False
+            self.concatenate_terms = True
+
+    proprio: ProprioObservationsCfg = ProprioObservationsCfg()
+    extero: ExteroObservationsCfg = ExteroObservationsCfg()
 
 @configclass
 class StudentObservationsCfg:

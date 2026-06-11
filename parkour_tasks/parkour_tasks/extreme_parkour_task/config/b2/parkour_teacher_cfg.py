@@ -22,6 +22,19 @@ class ParkourTeacherSceneCfg(ParkourDefaultSceneCfg):
         debug_vis=False,
         mesh_prim_paths=["/World/ground"],
     )
+    lidar_sensor = RayCasterCfg(
+        prim_path="{ENV_REGEX_NS}/Robot/base_link",
+        update_period=0.1,
+        pattern_cfg=patterns.LidarPatternCfg(
+            vertical_fov_range=(-20.0, 20.0),
+            horizontal_fov_range=(-180.0, 180.0),
+            horizontal_res=1.0,
+            channels=16,
+        ),
+        max_distance=10.0,
+        debug_vis=False,
+        mesh_prim_paths=["/World/ground"],
+    )
     contact_forces = ContactSensorCfg(prim_path="{ENV_REGEX_NS}/Robot/.*", 
                                       history_length=2, 
                                       track_air_time=True, 

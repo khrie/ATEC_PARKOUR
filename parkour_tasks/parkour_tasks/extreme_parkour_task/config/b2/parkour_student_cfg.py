@@ -66,10 +66,9 @@ class UnitreeB2StudentParkourEnvCfg(ParkourManagerBasedRLEnvCfg):
         self.actions.joint_pos.use_delay = True
         self.actions.joint_pos.history_length = 8
 
-        # Disable sensors not present in the B2 scene that are required by ObservationsCfg
-        self.scene.lidar_sensor = None
-        self.observations.extero.lidar_scan = None
-        self.observations.extero.concatenate_terms = False
+        # Update sensor update periods for exteroception
+        if self.scene.lidar_sensor is not None:
+            self.scene.lidar_sensor.update_period = self.sim.dt * self.decimation
 
         self.scene.head_camera = None
         self.observations.image.head_rgb = None
