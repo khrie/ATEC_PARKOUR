@@ -361,6 +361,10 @@ class TeacherRewardsCfg:
             "asset_cfg":SceneEntityCfg("robot"),
         },
     )
+    reward_termination = RewTerm(
+        func=mdp.is_terminated, 
+        weight=-200.0, 
+    )
 
 @configclass
 class TerminationsCfg:
@@ -368,10 +372,14 @@ class TerminationsCfg:
 
     total_terminates = DoneTerm(
         func=terminations.terminate_episode, 
-        time_out=True,
+        time_out=False,
         params= {
             "asset_cfg":SceneEntityCfg("robot")
         },
+    )
+    time_out = DoneTerm(
+        func=mdp.time_out,
+        time_out=True,
     )
     
 @configclass

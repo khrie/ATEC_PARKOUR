@@ -167,18 +167,13 @@ class PPOWithExtractor(PPO):
             generator = self.storage.mini_batch_generator(self.num_mini_batches, self.num_learning_epochs)
 
         for batch in generator:
-            obs_batch = _extract_obs(batch.observations)
-            critic_obs_batch = batch.observations["critic"] if "critic" in batch.observations.keys() else obs_batch
-            actions_batch = batch.actions
-            target_values_batch = batch.values
-            advantages_batch = batch.advantages
-            returns_batch = batch.returns
-            old_actions_log_prob_batch = batch.old_actions_log_prob
-            old_mu_batch = batch.old_distribution_params[0]
-            old_sigma_batch = batch.old_distribution_params[1]
-            hid_states_batch = [None, None]
-            masks_batch = None
-            rnd_state_batch = batch.observations["rnd_state"] if "rnd_state" in batch.observations.keys() else None
+            # rsl_rl's RolloutStorage.mini_batch_generator yields a plain tuple:
+            # (obs, actions, values, advantages, returns, old_log_prob, old_mu, old_sigma, hidden_states, masks)
+            obs_dict_batch, actions_batch, target_values_batch, advantages_batch, returns_batch, \
+                old_actions_log_prob_batch, old_mu_batch, old_sigma_batch, hid_states_batch, masks_batch = batch
+            obs_batch = _extract_obs(obs_dict_batch)
+            critic_obs_batch = obs_dict_batch["critic"] if isinstance(obs_dict_batch, dict) and "critic" in obs_dict_batch.keys() else obs_batch
+            rnd_state_batch = obs_dict_batch["rnd_state"] if isinstance(obs_dict_batch, dict) and "rnd_state" in obs_dict_batch.keys() else None
 
             # number of augmentations per sample
             # we start with 1 and increase it if we use symmetry augmentation
@@ -230,13 +225,16 @@ class PPOWithExtractor(PPO):
             priv_reg_stage = min(max((self.counter - self.priv_reg_coef_schedual[2]), 0) / self.priv_reg_coef_schedual[3], 1)
             priv_reg_coef = priv_reg_stage * (self.priv_reg_coef_schedual[1] - self.priv_reg_coef_schedual[0]) + self.priv_reg_coef_schedual[0]
 
-            # Estimator
-            priv_states_predicted = self.estimator(obs_batch[:, :self.num_prop])  # obs in batch is with true priv_states
-            estimator_loss = (priv_states_predicted - obs_batch[:, self.num_prop+self.num_scan:self.num_prop+self.num_scan+self.priv_states_dim]).pow(2).mean()
-            self.estimator_optimizer.zero_grad()
-            estimator_loss.backward()
-            nn.utils.clip_grad_norm_(self.estimator.parameters(), self.max_grad_norm)
-            self.estimator_optimizer.step()
+            # Estimator (only if there are privileged states to predict)
+            if self.priv_states_dim > 0:
+                priv_states_predicted = self.estimator(obs_batch[:, :self.num_prop])  # obs in batch is with true priv_states
+                estimator_loss = (priv_states_predicted - obs_batch[:, self.num_prop+self.num_scan:self.num_prop+self.num_scan+self.priv_states_dim]).pow(2).mean()
+                self.estimator_optimizer.zero_grad()
+                estimator_loss.backward()
+                nn.utils.clip_grad_norm_(self.estimator.parameters(), self.max_grad_norm)
+                self.estimator_optimizer.step()
+            else:
+                estimator_loss = torch.tensor(0.0, device=self.device)
 
             # KL
             if self.desired_kl is not None and self.schedule == "adaptive":
@@ -411,18 +409,11 @@ class PPOWithExtractor(PPO):
         else:
             generator = self.storage.mini_batch_generator(self.num_mini_batches, self.num_learning_epochs)
         for batch in generator:
-            obs_batch = _extract_obs(batch.observations)
-            critic_obs_batch = batch.observations["critic"] if "critic" in batch.observations.keys() else obs_batch
-            actions_batch = batch.actions
-            target_values_batch = batch.values
-            advantages_batch = batch.advantages
-            returns_batch = batch.returns
-            old_actions_log_prob_batch = batch.old_actions_log_prob
-            old_mu_batch = batch.old_distribution_params[0]
-            old_sigma_batch = batch.old_distribution_params[1]
-            hid_states_batch = [None, None]
-            masks_batch = None
-            rnd_state_batch = batch.observations["rnd_state"] if "rnd_state" in batch.observations.keys() else None
+            obs_dict_batch, actions_batch, target_values_batch, advantages_batch, returns_batch, \
+                old_actions_log_prob_batch, old_mu_batch, old_sigma_batch, hid_states_batch, masks_batch = batch
+            obs_batch = _extract_obs(obs_dict_batch)
+            critic_obs_batch = obs_dict_batch["critic"] if isinstance(obs_dict_batch, dict) and "critic" in obs_dict_batch.keys() else obs_batch
+            rnd_state_batch = obs_dict_batch["rnd_state"] if isinstance(obs_dict_batch, dict) and "rnd_state" in obs_dict_batch.keys() else None
             with torch.inference_mode():
                 self.policy.act(obs_batch, 
                                 hist_encoding=True, 
